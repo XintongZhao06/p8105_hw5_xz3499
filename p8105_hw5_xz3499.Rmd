@@ -17,6 +17,7 @@ knitr::opts_chunk$set(
 library(tidyverse)
 library(ggplot2)
 library(broom)
+library(knitr)
 ```
 
 ## Problem 1
@@ -176,4 +177,93 @@ Description:
 
 When μ is small (0 to 2), the number of rejected samples is higher than that of all samples and above the dotted line of the true mean, which means that the samples that reject the null hypothesis tend to have a higher estimated mean. When μ is large (≥3), the two lines almost coincide, and the estimated value is close to the true μ. This is because when the effect size is small, the null hypothesis will only be rejected when the sample mean is unexpectedly high. Therefore, the average estimate of the rejected sample will be systematically high (selective bias). When the effect size is large enough, almost all samples can reject the null hypothesis. At this point, the rejected samples are almost consistent with the population sample, and the bias disappears.
 
+## Problem 3
+
+```{r}
+homicide_data <- read_csv("homicide-data.csv")
+
+summary(homicide_data)
+```
+
+Description:
+
+The original dataset of this homicide case contains `nrow(homicide_data)` records, spanning from January 1, 2007 to November 5, 2015. The data includes case identification information, detailed information of the victim (including name, race, age and gender), geographic information (city, state and longitude and latitude coordinates of occurrence), as well as the handling status of the case. Among them, there are 60 missing values in the longitude and latitude coordinates, the age of the victim is stored in character form, and there is an abnormal entry of 9 digits in the maximum report date. In addition, the data integrity of other variables is relatively good, and it completely records the details of homicide cases in multiple cities in the United States over the past nine years.
+
+```{r}
+homicide_summary <- homicide_data %>%
+  mutate(
+    city_state = paste(city, state, sep = ", ")
+  ) %>%
+  group_by(city_state) %>%
+  summarize(
+    total_homicides = n(),
+    unsolved_homicides = sum(disposition %in% c("Closed without arrest", "Open/No arrest"))
+  ) %>%
+  filter(total_homicides > 0) 
+```
+
+```{r}
+baltimore_data <- homicide_summary %>%
+  filter(city_state == "Baltimore, MD")
+
+baltimore_test <- prop.test(
+  x = baltimore_data$unsolved_homicides,
+  n = baltimore_data$total_homicides
+)
+
+baltimore_results <- broom::tidy(baltimore_test) %>%
+  select(estimate, conf.low, conf.high) %>%
+  mutate(city_state = "Baltimore, MD")
+
+kable(baltimore_results)
+```
+
+```{r}
+all_city_tests <- homicide_summary %>%
+  mutate(
+    test_results = map2(unsolved_homicides, total_homicides,
+                       ~broom::tidy(prop.test(x = .x, n = .y)))
+  ) %>%
+  unnest(test_results) %>%
+  select(city_state, total_homicides, unsolved_homicides, 
+         estimate, conf.low, conf.high)
+
+kable(all_city_tests)
+```
+
+
+
+```{r}
+homicide_plot <- all_city_tests %>%
+  mutate(city_state = fct_reorder(city_state, estimate)) %>%
+  ggplot(aes(x = estimate, y = city_state)) +
+  geom_point(color = "#A23B72", size = 2, alpha = 0.8) +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), 
+                 height = 0.3, color = "#A23B72", alpha = 0.6, size = 0.8) +
+  geom_vline(xintercept = mean(all_city_tests$estimate), 
+             linetype = "dashed", color = "#34495E", alpha = 0.7) +
+  labs(
+    title = "Proportion of Unsolved Homicides by City",
+    subtitle = "Cities ordered by proportion of unsolved cases | Dashed line = overall average",
+    x = "Proportion Unsolved",
+    y = NULL,
+    caption = "Data: Washington Post Homicide Database\nError bars show 95% confidence intervals"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5, color = "#2C3E50"),
+    plot.subtitle = element_text(hjust = 0.5, color = "#7F8C8D", size = 10),
+    plot.caption = element_text(color = "#95A5A6", size = 9),
+    axis.text.y = element_text(size = 4, color = "#2C3E50"),
+    axis.text.x = element_text(color = "#2C3E50"),
+    axis.title.x = element_text(color = "#2C3E50", face = "bold"),
+    panel.grid.major.y = element_line(color = "#ECF0F1", size = 0.3),
+    panel.grid.minor = element_blank(),
+    plot.background = element_rect(fill = "white", color = NA)
+  ) +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1))
+
+# Display the plot
+print(homicide_plot)
+```
 
